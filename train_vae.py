@@ -23,7 +23,7 @@ from models.autoencoder_kl import AutoencoderKL
 
 
 @torch.no_grad()
-def validation(eval_loader, vae, accelerator, loss_fn, weight_dtype, htr, writer_id, len_eval_loader, wandb_prefix="eval"):
+def validation(eval_loader, vae, accelerator, loss_fn, weight_dtype, htr, writer_id, len_eval_loader, wandb_prefix="eval", keep_background=False):
     vae_model = accelerator.unwrap_model(vae)
     vae_model.eval()
     htr_model = accelerator.unwrap_model(htr)
@@ -34,10 +34,15 @@ def validation(eval_loader, vae, accelerator, loss_fn, weight_dtype, htr, writer
     images_for_log = []
     images_for_log_w_htr_wid = []
 
+    if keep_background:
+        target_image_key = 'rgb'
+    else:
+        target_image_key = 'bw'
+
     for step, batch in enumerate(eval_loader):
         with accelerator.autocast():
             images = batch['rgb'].to(weight_dtype)
-            target_images = batch['bw'].to(weight_dtype)
+            target_images = batch[target_image_key].to(weight_dtype)
             authors_id = batch['writer_id']
 
             text_logits_s2s = batch['text_logits_s2s']
@@ -114,8 +119,14 @@ def train():
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--mixed_precision", type=str, default="no")
     parser.add_argument("--checkpoints_total_limit", type=int, default=5)
+    parser.add_argument("--keep_background", type=str, default="False", help="whether to keep background during training")
 
     args = parser.parse_args()
+
+    if str(args.keep_background).lower() in ("true", "1"):
+        args.keep_background = True
+    else:
+        args.keep_background = False
 
     args.use_ema = args.use_ema == "True"
     args.adam_beta1 = 0.9
@@ -248,6 +259,11 @@ def train():
     # Determine if we need to use .module for multi-process training
     use_module = accelerator.num_processes > 1
 
+    if args.keep_background:
+        target_image_key = 'rgb'
+    else:
+        target_image_key = 'bw'
+
     for epoch in range(train_state.epoch, args.epochs):
 
         vae.train()
@@ -257,7 +273,7 @@ def train():
 
             with accelerator.accumulate(vae):
                 images = batch['rgb'].to(weight_dtype)
-                target_images = batch['bw'].to(weight_dtype)
+                target_images = batch[target_image_key].to(weight_dtype)
                 authors_id = batch['writer_id']
 
                 text_logits_s2s = batch['text_logits_s2s']
@@ -318,13 +334,13 @@ def train():
 
         if epoch % args.eval_epochs == 0 and accelerator.is_main_process:
             with torch.no_grad():
-                eval_loss = validation(eval_loader, vae, accelerator, loss_fn, weight_dtype,  htr, writer_id, LEN_EVAL_LOADER, 'eval')
+                eval_loss = validation(eval_loader, vae, accelerator, loss_fn, weight_dtype,  htr, writer_id, LEN_EVAL_LOADER, 'eval', keep_background=args.keep_background)
                 eval_loss = broadcast(torch.tensor(eval_loss, device=accelerator.device), from_process=0)
 
                 if args.use_ema:
                     ema_vae.store(vae.parameters())
                     ema_vae.copy_to(vae.parameters())
-                    _ = validation(eval_loader, vae, accelerator, loss_fn, weight_dtype,  htr, writer_id, LEN_EVAL_LOADER, 'ema')
+                    _ = validation(eval_loader, vae, accelerator, loss_fn, weight_dtype,  htr, writer_id, LEN_EVAL_LOADER, 'ema', keep_background=args.keep_background)
                     ema_vae.restore(vae.parameters())
 
                 if eval_loss < train_state.best_eval:
