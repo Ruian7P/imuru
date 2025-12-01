@@ -104,6 +104,7 @@ def train():
     parser.add_argument('--wandb_log_interval_steps', type=int, default=25, help="wandb log interval")
 
     parser.add_argument("--vae_path", type=str, default="blowing-up-groundhogs/emuru_vae", help='vae checkpoint path')
+    parser.add_argument("--t5_size", type=str, default="large", help='t5 model size', choices=['small', 'base', 'large', '3b', '11b'])
 
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--mixed_precision", type=str, default="no")
@@ -148,7 +149,7 @@ def train():
         args.logging_dir.mkdir(parents=True, exist_ok=True)
 
     emuru_config = EmuruConfig(
-        t5_name_or_path='google-t5/t5-large',
+        t5_name_or_path=f'google-t5/t5-{args.t5_size}',
         vae_name_or_path=args.vae_path,
         tokenizer_name_or_path='google/byt5-small',
         slices_per_query=1,

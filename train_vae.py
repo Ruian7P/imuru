@@ -272,32 +272,33 @@ def train():
         for batch in train_loader:
 
             with accelerator.accumulate(vae):
-                images = batch['rgb'].to(weight_dtype)
-                target_images = batch[target_image_key].to(weight_dtype)
-                authors_id = batch['writer_id']
+                with accelerator.autocast():
+                    images = batch['rgb'].to(weight_dtype)
+                    target_images = batch[target_image_key].to(weight_dtype)
+                    authors_id = batch['writer_id']
 
-                text_logits_s2s = batch['text_logits_s2s']
-                text_logits_s2s_unpadded_len = batch['texts_len']
-                tgt_mask = batch['tgt_key_mask']
-                tgt_key_padding_mask = batch['tgt_key_padding_mask']
+                    text_logits_s2s = batch['text_logits_s2s']
+                    text_logits_s2s_unpadded_len = batch['texts_len']
+                    tgt_mask = batch['tgt_key_mask']
+                    tgt_key_padding_mask = batch['tgt_key_padding_mask']
 
-                if use_module:
-                    posterior = vae.module.encode(images).latent_dist
-                else:
-                    posterior = vae.encode(images).latent_dist
-                z = posterior.sample()
-                if use_module:
-                    pred = vae.module.decode(z).sample
-                else:
-                    pred = vae.decode(z).sample
+                    if use_module:
+                        posterior = vae.module.encode(images).latent_dist
+                    else:
+                        posterior = vae.encode(images).latent_dist
+                    z = posterior.sample()
+                    if use_module:
+                        pred = vae.module.decode(z).sample
+                    else:
+                        pred = vae.decode(z).sample
 
-                loss, _, _ = loss_fn(images=target_images, z=z, reconstructions=pred, posteriors=posterior,
-                                                writers=authors_id, text_logits_s2s=text_logits_s2s,
-                                                text_logits_s2s_length=text_logits_s2s_unpadded_len,
-                                                tgt_key_padding_mask=tgt_key_padding_mask, source_mask=tgt_mask,
-                                                split="train", htr=htr, writer_id=writer_id)
+                    loss, _, _ = loss_fn(images=target_images, z=z, reconstructions=pred, posteriors=posterior,
+                                                    writers=authors_id, text_logits_s2s=text_logits_s2s,
+                                                    text_logits_s2s_length=text_logits_s2s_unpadded_len,
+                                                    tgt_key_padding_mask=tgt_key_padding_mask, source_mask=tgt_mask,
+                                                    split="train", htr=htr, writer_id=writer_id)
 
-                loss = loss['loss']
+                    loss = loss['loss']
 
                 if not torch.isfinite(loss):
                     logger.warning("non-finite loss")

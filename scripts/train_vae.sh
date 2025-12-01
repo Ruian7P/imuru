@@ -7,6 +7,6 @@ python -W ignore train_vae.py \
     --mixed_precision fp16 \
     --keep_background True \
     --report_to "wandb" \
-    --wandb_entity "ruian7p" \
+    --wandb_entity "emuru" \
     --wandb_project_name "emuru_vae" \
     --wandb_log_interval_steps 100

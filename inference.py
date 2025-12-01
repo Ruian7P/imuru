@@ -13,14 +13,14 @@ def load_image(img_path):
     return img
 
 # 1. Load the model
-model_path = "./results/pretrain_2e-5_ech5"
+model_path = "./results/t5_small_2e-5_ech5"
 model = AutoModel.from_pretrained(model_path, trust_remote_code=True)
 model.cuda()  # Move to GPU if available
 
 # 2. Prepare your inputs
-style_text = 'HAS THAT JYJ Yok. Kwame'
+style_text = 'Wm. !/ FAO zhiv [$] WEB'
 gen_text = 'Ruian7P'
-img_path = "./dataset/sample/sample1.jpg"
+img_path = "./dataset/sample/sample2.png"
 style_img = load_image(img_path)
 style_img = style_img.cuda()
 
@@ -33,4 +33,4 @@ generated_pil_image = model.generate(
 )
 
 # 4. Save the result
-generated_pil_image.save(model_path + "/generated_image1.png")
+generated_pil_image.save(model_path + "/generated_image_with_background.png")
