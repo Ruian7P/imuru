@@ -234,3 +234,83 @@ class DataLoaderManager:
             num_workers=self.num_workers,
             persistent_workers=False
         )
+    
+
+
+class ours_DataLoaderManager:
+    """Handles dataset creation and data loading"""
+    
+    def __init__(self, train_pattern: str, eval_pattern: str, train_batch_size: int, eval_batch_size: int, num_workers: int, pin_memory: bool, 
+        persistent_workers: bool, tokenizer: Optional[AutoTokenizer] = None):
+
+        self.train_pattern = train_pattern
+        self.eval_pattern = eval_pattern
+        self.train_batch_size = train_batch_size
+        self.eval_batch_size = eval_batch_size
+        self.num_workers = num_workers
+        self.pin_memory = pin_memory
+        self.persistent_workers = persistent_workers
+        self.alphabet = Alphabet(FONT_SQUARE_CHARSET)
+        if tokenizer is not None:
+            self.tokenizer = tokenizer
+        
+    def create_dataset(self, split: str, model_type: str):
+        """Create training dataset using WebDataset"""
+
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize([0.5], [0.5])
+        ])
+        collate_fn: Union[VAECollate, WIDCollate, T5Collate]
+        if model_type == 'vae' or model_type == 'htr':
+            collate_fn = VAECollate(self.alphabet)
+        elif model_type == 'wid':
+            collate_fn = WIDCollate()
+        elif model_type == 't5':
+            collate_fn = T5Collate(self.tokenizer)
+        else:
+            raise ValueError(f"Invalid model type: {model_type}")
+
+        if split == 'train':
+            pattern = self.train_pattern
+        elif split == 'eval':
+            pattern = self.eval_pattern
+        else:
+            raise ValueError(f"Invalid split: {split}")
+        
+        shuffle = 100 if split == 'train' else 0
+        dataset = (
+            wds.WebDataset(pattern,  nodesplitter=wds.split_by_node, shardshuffle=shuffle)
+            .decode("pil")
+            .map(lambda sample: {
+                "rgb.png": transform(sample["rgb.png"].convert('RGB')),
+                "bw.png": transform(sample["bw.png"].convert('L')),
+                'json': sample['json'],
+                'encoded_text': self.alphabet.encode(sample['json']['text']),
+            })
+        )
+        
+        return DataLoader(
+            dataset, 
+            batch_size=self.train_batch_size if split == 'train' else self.eval_batch_size,
+            pin_memory=self.pin_memory if split == 'train' else False,
+            collate_fn=collate_fn,
+            num_workers=self.num_workers if split == 'train' else 0,
+            drop_last=True if split == 'train' else False,
+            persistent_workers=self.persistent_workers if split == 'train' else False
+        )
+
+    def create_karaoke_dataset(self):
+        """Create dataset with Karaoke datasets"""
+        karaoke_handw = KaraokeLines('handwritten', num_style_samples=1, load_gen_sample=True)
+        karaoke_typew = KaraokeLines('typewritten', num_style_samples=1, load_gen_sample=True)
+        eval_dataset = ConcatDataset([SHTGWrapper(karaoke_handw), SHTGWrapper(karaoke_typew)])
+
+        return DataLoader(
+            eval_dataset,
+            batch_size=1,
+            shuffle=False,
+            collate_fn=karaoke_collate_fn,
+            num_workers=self.num_workers,
+            persistent_workers=False
+        )

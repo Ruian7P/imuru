@@ -14,71 +14,10 @@ from accelerate.utils import broadcast
 from accelerate.utils import ProjectConfiguration, set_seed
 from transformers.optimization import get_scheduler
 import evaluate
-from torchvision import transforms
-
 
 from utils import TrainState
 from models.writer_id import WriterID, WriterIDConfig
-from dataset.iam_dataset import IAMDataset
-
-
-class IAMWriterIDDataset(torch.utils.data.Dataset):
-    """
-    给 WriterID 分类用的 Dataset：
-    - 输入：底层的 IAMDataset / WordLineDataset 实例
-    - 输出：dict {'bw': [1,H,W], 'writer_id': LongTensor()}
-    """
-    def __init__(self, base_iam_dataset, to_bw=True):
-        self.base = base_iam_dataset
-        self.to_bw = to_bw
-
-        # 用底层的 transform，如果你愿意也可以在这里重写
-        self.transform = self.base.transforms
-
-        # 转灰度（1 通道）给 WriterID 用
-        if to_bw:
-            self.gray = transforms.Grayscale(num_output_channels=1)
-        else:
-            self.gray = None
-
-        # ToTensor 兜底（如果底层 data 里还是 PIL）
-        self.to_tensor = transforms.ToTensor()
-
-    def __len__(self):
-        return len(self.base.data)
-
-    def __getitem__(self, idx):
-        # IAMDataset.main_loader 里 append 的是：
-        # (img, transcr, writer_name, img_path)
-        img, transcr, wid, img_path = self.base.data[idx]
-
-        # 先做 transform（如果有）
-        if self.transform is not None:
-            img = self.transform(img)
-        else:
-            if not isinstance(img, torch.Tensor):
-                img = self.to_tensor(img)
-
-        # 转成 1 通道
-        if self.to_bw:
-            if isinstance(img, torch.Tensor):
-                # [C,H,W]，C=3 -> 灰度
-                if img.dim() == 3 and img.size(0) == 3:
-                    img_bw = self.gray(img)
-                else:
-                    img_bw = img
-            else:
-                # 理论上到不了这里，保险起见
-                img_tensor = self.to_tensor(img)
-                img_bw = self.gray(img_tensor)
-        else:
-            img_bw = img
-
-        sample = {
-            "bw": img_bw,                          # 训练代码里用 batch['bw']
-            "writer_id": torch.tensor(wid).long(), # 训练代码里用 batch['writer_id']
-        }
-        return sample
+from custom_datasets import DataLoaderManager
 
 
 @torch.no_grad()
@@ -198,50 +137,17 @@ def train():
         weight_decay=args.adam_weight_decay,
         eps=args.adam_epsilon)
 
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-    ])
-    iam_folder = '/home/ruian7p/Projects/Emuru/dataset/IAM/words'
-
-    train_base = IAMDataset(
-        basefolder=iam_folder,
-        subset='train',
-        segmentation_level='word',
-        fixed_size=(64, 256),
-        tokenizer=None,
-        text_encoder=None,
-        feat_extractor=None,
-        transforms=transform,
-        args=args,
-    )
-    test_base = IAMDataset(
-        iam_folder,
-        'test',
-        'word',
-        fixed_size=(64, 256),
-        tokenizer=None,
-        text_encoder=None,
-        feat_extractor=None,
-        transforms=transform,
-        args=args,
-    )
-
-    train_dataset = IAMWriterIDDataset(train_base, to_bw=True)
-    eval_dataset = IAMWriterIDDataset(test_base, to_bw=True)
-
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=args.train_batch_size,
-        shuffle=True,
+    data_loader = DataLoaderManager(
+        train_pattern=("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-v2/resolve/main/tars/train/{000000..000498}.tar"),
+        eval_pattern=("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-v2/resolve/main/tars/train/{000499..000499}.tar"),
+        train_batch_size=args.train_batch_size,
+        eval_batch_size=args.eval_batch_size,
         num_workers=4,
+        pin_memory=False,
+        persistent_workers=False,
     )
-    eval_loader = torch.utils.data.DataLoader(
-        eval_dataset,
-        batch_size=args.eval_batch_size,
-        shuffle=False,
-        num_workers=4,
-    )
+    train_loader = data_loader.create_dataset('train', 'wid')
+    eval_loader = data_loader.create_dataset('eval', 'wid')
 
     try: 
         NUM_SAMPLES_TRAIN = len(train_loader.dataset)

@@ -16,7 +16,7 @@ from transformers.optimization import get_scheduler
 
 from utils import TrainState
 from custom_datasets import DataLoaderManager
-from models.ours import Emuru, EmuruConfig
+from models.emuru import Emuru, EmuruConfig
 
 
 @torch.no_grad()

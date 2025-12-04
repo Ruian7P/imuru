@@ -218,4 +218,6 @@ results_htr/
 results_vae/
 HWD/
 
-dataset/
+dataset/IAM/
+dataset/sample/
+saved_iam_data/

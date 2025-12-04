@@ -16,7 +16,7 @@ from transformers.optimization import get_scheduler
 
 from utils import TrainState
 from custom_datasets import DataLoaderManager
-from models.emuru import Emuru, EmuruConfig
+from models.ours import Emuru, EmuruConfig
 
 
 @torch.no_grad()
@@ -171,15 +171,16 @@ def train():
     )
 
     if args.training_type == 'pretrain':
-        train_pattern = ("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-v2/resolve/main/tars/train/{000000..000498}.tar")
-        eval_pattern = ("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-v2/resolve/main/tars/train/{000499..000499}.tar")
-        NUM_SAMPLES_TRAIN = 8_000 * 499
-        NUM_SAMPLES_EVAL = 8_000
+        train_pattern = ("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-pretrain-20M/resolve/main/tars/{000000..000498}.tar")
+        eval_pattern = ("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-pretrain-20M/resolve/main/tars/{000499..000499}.tar")
+        NUM_SAMPLES_TRAIN = 10_000 * 499
+        NUM_SAMPLES_EVAL = 10_000
     elif args.training_type == 'finetune':
-        train_pattern = ("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-v2/resolve/main/tars/fine_tune/{000000..000048}.tar")
-        eval_pattern = ("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-v2/resolve/main/tars/fine_tune/{000049..000049}.tar")
-        NUM_SAMPLES_TRAIN = 8_000 * 49
-        NUM_SAMPLES_EVAL = 8_000
+        # train_pattern = ("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-v2/resolve/main/tars/fine_tune/{000000..000048}.tar")
+        # eval_pattern = ("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-v2/resolve/main/tars/fine_tune/{000049..000049}.tar")
+        # NUM_SAMPLES_TRAIN = 10_000 * 49
+        # NUM_SAMPLES_EVAL = 10_000
+        raise NotImplementedError("Finetune dataset is not prepared yet.")
     else:
         raise ValueError(f"Invalid training type: {args.training_type}")
 
