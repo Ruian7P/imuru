@@ -1,0 +1,11 @@
+python train_T5.py \
+    --train_batch_size 32 \
+    --epochs 5 \
+    --lr 2e-5 \
+    --mixed_precision fp16 \
+    --t5_size "small" \
+    --vae_path "./results/vae_2e-5_ech5" \
+    --report_to "wandb" \
+    --wandb_entity "emuru" \
+    --wandb_project_name "emuru_t5" \
+    --wandb_log_interval_steps 100
