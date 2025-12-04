@@ -4,8 +4,8 @@ python train_T5.py \
     --lr 2e-5 \
     --mixed_precision fp16 \
     --t5_size "small" \
-    --vae_path "./results/vae_2e-5_ech5" \
+    --vae_path "blowing-up-groundhogs/emuru_vae" \
     --report_to "wandb" \
     --wandb_entity "emuru" \
-    --wandb_project_name "emuru_t5" \
+    --wandb_project_name "ours_t5_small" \
     --wandb_log_interval_steps 100

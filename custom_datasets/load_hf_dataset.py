@@ -102,6 +102,17 @@ class T5Collate:
         res = self.tokenizer(txts, padding=True, return_tensors='pt', return_attention_mask=True, return_length=True)
         res['img'] = DataProcessor.pad_images([sample['rgb.png'] for sample in batch])
         return res
+    
+class ours_T5Collate:
+    def __init__(self, tokenizer):
+        self.tokenizer = tokenizer
+    
+    def __call__(self, batch):
+        txts = [sample['json']['gen_text'] for sample in batch]
+        res = self.tokenizer(txts, padding=True, return_tensors='pt', return_attention_mask=True, return_length=True)
+        res['img'] = DataProcessor.pad_images([sample['style.png'] for sample in batch])
+        res['label_img'] = DataProcessor.pad_images([sample['gen.png'] for sample in batch])
+        return res
 
 
 
@@ -261,13 +272,13 @@ class ours_DataLoaderManager:
             transforms.ToTensor(),
             transforms.Normalize([0.5], [0.5])
         ])
-        collate_fn: Union[VAECollate, WIDCollate, T5Collate]
+        collate_fn: Union[VAECollate, WIDCollate, ours_T5Collate]
         if model_type == 'vae' or model_type == 'htr':
             collate_fn = VAECollate(self.alphabet)
         elif model_type == 'wid':
             collate_fn = WIDCollate()
         elif model_type == 't5':
-            collate_fn = T5Collate(self.tokenizer)
+            collate_fn = ours_T5Collate(self.tokenizer)
         else:
             raise ValueError(f"Invalid model type: {model_type}")
 
@@ -283,10 +294,10 @@ class ours_DataLoaderManager:
             wds.WebDataset(pattern,  nodesplitter=wds.split_by_node, shardshuffle=shuffle)
             .decode("pil")
             .map(lambda sample: {
-                "rgb.png": transform(sample["rgb.png"].convert('RGB')),
-                "bw.png": transform(sample["bw.png"].convert('L')),
+                "style.png": transform(sample["style.rgb.png"].convert('RGB')),
+                "gen.png": transform(sample["gen.bw.png"].convert('L')),
                 'json': sample['json'],
-                'encoded_text': self.alphabet.encode(sample['json']['text']),
+                'encoded_text': self.alphabet.encode(sample['json']['gen_text']),
             })
         )
         

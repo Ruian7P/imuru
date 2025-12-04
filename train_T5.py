@@ -15,7 +15,7 @@ from accelerate.utils import ProjectConfiguration, set_seed
 from transformers.optimization import get_scheduler
 
 from utils import TrainState
-from custom_datasets import DataLoaderManager
+from custom_datasets import ours_DataLoaderManager
 from models.ours import Emuru, EmuruConfig
 
 
@@ -184,7 +184,7 @@ def train():
     else:
         raise ValueError(f"Invalid training type: {args.training_type}")
 
-    data_loader = DataLoaderManager(
+    data_loader = ours_DataLoaderManager(
         train_pattern=train_pattern,
         eval_pattern=eval_pattern,
         train_batch_size=args.train_batch_size,
@@ -250,9 +250,10 @@ def train():
 
             with accelerator.accumulate(model):
                 images = batch['img'].to(weight_dtype)
+                label_imgs = batch['label_img'].to(weight_dtype)
                 input_ids = batch['input_ids'].long()
 
-                loss, _, _ = model(images, input_ids=input_ids, attention_mask=batch['attention_mask'], noise=args.teacher_noise)
+                loss, _, _ = model(images, label_imgs=label_imgs, input_ids=input_ids, attention_mask=batch['attention_mask'], noise=args.teacher_noise)
 
                 if not torch.isfinite(loss):
                     logger.warning("non-finite loss")
