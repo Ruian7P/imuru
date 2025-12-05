@@ -206,12 +206,13 @@ class Emuru(PreTrainedModel):
         if teacher_p >= 1.0 and teacher_w >= 1.0:        
             label_embeds = self.vae_to_t5(z_label_sequence_noisy)  # (b, w, t5_d_model)
             decoder_inputs_embeds = torch.cat(
-                [sos, style_token_embed, label_embeds], dim=1
-            ) # (b, 1 + 1 + w, t5_d_model)
+                [sos, style_token_embed, label_embeds[:, :-1]], dim=1
+            ) # (b, 1 + 1 + w - 1, t5_d_model)
 
-            output = self.T5(input_ids, attention_mask=attention_mask, decoder_inputs_embeds=decoder_inputs_embeds) # (b, 2+l_pred, t5_d_model)
-            all_vae_latent = self.t5_to_vae(output.logits) # (b, 2 + l_pred, vae_latent_size)
-            vae_latent = all_vae_latent[:, 2:]  # Remove sos and style token (b, l_pred, vae_latent_size)
+            output = self.T5(input_ids, attention_mask=attention_mask, decoder_inputs_embeds=decoder_inputs_embeds) # (b, 2+l_pred -1, t5_d_model)
+            all_vae_latent = self.t5_to_vae(output.logits) # (b, 2 + l_pred -1, vae_latent_size)
+            vae_latent = all_vae_latent[:, 2:, :]  # Remove sos and style token (b, l_pred -1, vae_latent_size)
+            z_label_sequence = z_label_sequence[:, 1:, :]
         else:
             seq_len = z_label_sequence_noisy.size(1)
             decoder_inputs_embeds = torch.cat(
