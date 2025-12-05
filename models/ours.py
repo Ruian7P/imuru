@@ -205,14 +205,13 @@ class Emuru(PreTrainedModel):
         all_vae_latent = self.t5_to_vae(output.logits) # (b, 2 + l_pred, vae_latent_size)
         vae_latent = all_vae_latent[:, 2:]  # Remove sos and style token (b, l_pred, vae_latent_size)
 
-        pred_latent = self.z_rearrange(vae_latent_trimmed)
-
         # Fix: Ensure sequence lengths match for loss computation
         min_seq_len = min(vae_latent.size(1), z_label_sequence.size(1))
         vae_latent_trimmed = vae_latent[:, :min_seq_len]
         z_label_sequence_trimmed = z_label_sequence[:, :min_seq_len]    
 
         mse_loss = self.mse_criterion(vae_latent_trimmed, z_label_sequence_trimmed)
+        pred_latent = self.z_rearrange(vae_latent_trimmed)
 
         return mse_loss, pred_latent, z_label
 
@@ -247,10 +246,8 @@ class Emuru(PreTrainedModel):
     @torch.inference_mode()
     def generate_batch(
         self,
-        style_texts: List[str],
         gen_texts: List[str],
         style_imgs: torch.Tensor,
-        lengths: List[int],
         **kwargs: Any
     ) -> List[Image.Image]:
         """
@@ -265,17 +262,15 @@ class Emuru(PreTrainedModel):
             List[Image.Image]: List of generated images as PIL images.
         """
         assert style_imgs.ndim == 4, 'style_imgs must be 4D'
-        assert len(style_texts) == len(style_imgs), 'style_texts and style_imgs must have the same length'
         assert len(gen_texts) == len(style_imgs), 'gen_texts and style_imgs must have the same length'
-        texts = [style_text + ' ' + gen_text for style_text, gen_text in zip(style_texts, gen_texts)]
+        texts = [gen_text for gen_text in gen_texts]
         
-        imgs, _, img_ends = self._generate(texts=texts, imgs=style_imgs, lengths=lengths, **kwargs)
+        imgs, _ = self._generate(texts=texts, imgs=style_imgs, **kwargs)
         imgs = (imgs + 1) / 2
 
         out_imgs = []
-        for i, end in enumerate(img_ends):
-            start = lengths[i]
-            out_imgs.append(F.to_pil_image(imgs[i, ..., start:end].detach().cpu()))
+        for i in range(imgs.size(0)):
+            out_imgs.append(F.to_pil_image(imgs[i].detach().cpu()))
         return out_imgs
 
     def _generate(
@@ -288,7 +283,7 @@ class Emuru(PreTrainedModel):
         stopping_criteria: str = 'latent',
         stopping_after: int = 10,
         stopping_patience: int = 1
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Internal generation routine that combines textual and visual inputs to iteratively generate
         latent representations and decode them into images.
@@ -337,6 +332,7 @@ class Emuru(PreTrainedModel):
         pad_token = repeat(self.padding_token, '1 d -> b 1 d', b=input_ids.size(0))
 
         generated_latents: List[torch.Tensor] = []
+        active = torch.ones(input_ids.size(0), dtype=torch.bool, device=self.device) # for batch processing
 
         for step in range(max_new_tokens):
             if len(generated_latents) == 0:
@@ -348,9 +344,16 @@ class Emuru(PreTrainedModel):
         
             output = self.T5(input_ids, decoder_inputs_embeds=decoder_inputs_embeds)
             last_hidden = output.logits[:, -1:, :]  # (b, 1, t5_d_model)
-            vae_latent = self.t5_to_vae(last_hidden)  # (b, 1, vae_latent_size)
+            vae_latent = self.t5_to_vae(last_hidden)[:, 0, :]  # (b, vae_latent_size)
+
+            if stopping_criteria == 'latent' and (~active).any():
+                vae_latent = torch.where(
+                    active.unsqueeze(-1),
+                    vae_latent,
+                    pad_token.squeeze(1)
+                )
             
-            generated_latents.append(vae_latent[:, 0]) 
+            generated_latents.append(vae_latent) 
             canvas_sequence = torch.stack(generated_latents, dim=1)  # (b, t+1, vae_latent_size)
 
             if stopping_criteria == 'latent':
@@ -358,7 +361,10 @@ class Emuru(PreTrainedModel):
                 if similarity.size(1) >= stopping_after:
                     window = similarity[:, -stopping_after:] # (b, stopping_after)
                     cnt = (window > self.padding_token_threshold).to(torch.int).sum(dim=1)  # (b,)
-                    if cnt.item() >= (stopping_after - stopping_patience):
+                    new = (cnt >= (stopping_after - stopping_patience)) & active  # (b,)
+                    active = active & (~new)
+
+                    if not active.any():
                         break
 
             elif stopping_criteria == 'none':
@@ -372,7 +378,7 @@ class Emuru(PreTrainedModel):
         self,
         img: torch.Tensor,
         noise: float = 0
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Encode the input image into a latent representation using the VAE.
         Args:
