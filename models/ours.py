@@ -152,7 +152,8 @@ class Emuru(PreTrainedModel):
         img: Optional[torch.Tensor] = None,
         input_ids: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
-        noise: float = 0,
+        style_noise: float = 0,
+        label_noise: float = 0,
         label_img: Optional[torch.Tensor] = None,
         **kwargs: Any
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -175,8 +176,8 @@ class Emuru(PreTrainedModel):
         posterior_style = self.vae.encode(img.float())
         z_style = posterior_style.latent_dist.sample()
         z_style_sequence = self.query_rearrange(z_style)
-        if noise > 0:
-            z_style_sequence = z_style_sequence + torch.randn_like(z_style_sequence) * noise
+        if style_noise > 0:
+            z_style_sequence = z_style_sequence + torch.randn_like(z_style_sequence) * style_noise
 
         if self.style_enc == "mean":
             style_global = z_style_sequence.mean(dim=1, keepdim=True)  # (b, 1, d)
@@ -191,9 +192,14 @@ class Emuru(PreTrainedModel):
 
         posterior_label = self.vae.encode(label_img.float())
         z_label = posterior_label.latent_dist.sample()
-        z_label_sequence = self.query_rearrange(z_label)
+        z_label_sequence = self.query_rearrange(z_label) # (b, w, d)
+
+        if label_noise > 0:
+            z_label_sequence_noisy = z_label_sequence + torch.randn_like(z_label_sequence) * label_noise
+        else:
+            z_label_sequence_noisy = z_label_sequence
         
-        label_embeds = self.vae_to_t5(z_label_sequence)  # (b, w, t5_d_model)
+        label_embeds = self.vae_to_t5(z_label_sequence_noisy)  # (b, w, t5_d_model)
 
         sos = repeat(self.sos.weight, '1 d -> b 1 d', b=input_ids.size(0))
 

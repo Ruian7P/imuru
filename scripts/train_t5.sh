@@ -4,7 +4,8 @@ python train_T5.py \
     --lr 2e-5 \
     --mixed_precision fp16 \
     --t5_size "small" \
-    --teacher_noise 0.0 \
+    --style_noise 0.0 \
+    --label_noise 0.1 \
     --style_enc "MLP" \
     --vae_path "blowing-up-groundhogs/emuru_vae" \
     --report_to "wandb" \
