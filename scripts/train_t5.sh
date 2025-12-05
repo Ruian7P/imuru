@@ -6,6 +6,8 @@ python train_T5.py \
     --t5_size "small" \
     --style_noise 0.0 \
     --label_noise 0.1 \
+    --teacher_p 1.0 \
+    --teacher_w 1.0 \
     --style_enc "MLP" \
     --vae_path "blowing-up-groundhogs/emuru_vae" \
     --report_to "wandb" \

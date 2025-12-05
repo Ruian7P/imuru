@@ -150,11 +150,13 @@ class Emuru(PreTrainedModel):
     def forward(
         self,
         img: Optional[torch.Tensor] = None,
+        label_img: Optional[torch.Tensor] = None,
         input_ids: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         style_noise: float = 0,
         label_noise: float = 0,
-        label_img: Optional[torch.Tensor] = None,
+        teacher_p: float = 1.0,
+        teacher_w: float = 1.0,
         **kwargs: Any
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
@@ -181,7 +183,7 @@ class Emuru(PreTrainedModel):
 
         if self.style_enc == "mean":
             style_global = z_style_sequence.mean(dim=1, keepdim=True)  # (b, 1, d)
-        elif self.style_enc == "MLP" or self.style_enc == "MLP2":
+        elif self.style_enc in ["MLP", "MLP2"]:
             style_scores = self.style_encoder(z_style_sequence)  # (b, w, 1)
             style_weights = torch.softmax(style_scores, dim=1)  # (b, w, 1)
             style_global = (z_style_sequence * style_weights).sum(dim=1, keepdim=True)  # (b, 1, d)
@@ -198,18 +200,52 @@ class Emuru(PreTrainedModel):
             z_label_sequence_noisy = z_label_sequence + torch.randn_like(z_label_sequence) * label_noise
         else:
             z_label_sequence_noisy = z_label_sequence
-        
-        label_embeds = self.vae_to_t5(z_label_sequence_noisy)  # (b, w, t5_d_model)
 
         sos = repeat(self.sos.weight, '1 d -> b 1 d', b=input_ids.size(0))
 
-        decoder_inputs_embeds = torch.cat(
-            [sos, style_token_embed, label_embeds], dim=1
-        ) # (b, 1 + 1 + w, t5_d_model)
+        if teacher_p >= 1.0 and teacher_w >= 1.0:        
+            label_embeds = self.vae_to_t5(z_label_sequence_noisy)  # (b, w, t5_d_model)
+            decoder_inputs_embeds = torch.cat(
+                [sos, style_token_embed, label_embeds], dim=1
+            ) # (b, 1 + 1 + w, t5_d_model)
 
-        output = self.T5(input_ids, attention_mask=attention_mask, decoder_inputs_embeds=decoder_inputs_embeds) # (b, 2+l_pred, t5_d_model)
-        all_vae_latent = self.t5_to_vae(output.logits) # (b, 2 + l_pred, vae_latent_size)
-        vae_latent = all_vae_latent[:, 2:]  # Remove sos and style token (b, l_pred, vae_latent_size)
+            output = self.T5(input_ids, attention_mask=attention_mask, decoder_inputs_embeds=decoder_inputs_embeds) # (b, 2+l_pred, t5_d_model)
+            all_vae_latent = self.t5_to_vae(output.logits) # (b, 2 + l_pred, vae_latent_size)
+            vae_latent = all_vae_latent[:, 2:]  # Remove sos and style token (b, l_pred, vae_latent_size)
+        else:
+            seq_len = z_label_sequence_noisy.size(1)
+            decoder_inputs_embeds = torch.cat(
+                [sos, style_token_embed], dim=1
+            ) # (b, 1 + 1, t5_d_model)
+
+            vae_latent_list = []
+
+            for t in range(seq_len):
+                output = self.T5(input_ids, attention_mask=attention_mask, decoder_inputs_embeds=decoder_inputs_embeds) # (b, 2+i, t5_d_model)
+                last_hidden = output.logits[:, -1:, :]  # (b, 1, t5_d_model)
+                vae_latent_t = self.t5_to_vae(last_hidden) # (b, 1, vae_latent_size)
+                vae_latent_list.append(vae_latent_t)
+
+                gt_t = z_label_sequence_noisy[:, t:t+1, :]  # (b, 1, vae_latent_size)
+
+                if teacher_w >= 1.0:
+                    if teacher_p <= 0.0:
+                        next_input = vae_latent_t.detach()
+                    else:
+                        mask = (torch.rand_like(gt_t[..., :1]) < teacher_p).to(vae_latent_t.dtype)  # (b, 1, 1)
+                        next_input = mask * gt_t + (1 - mask) * vae_latent_t.detach()
+                
+                elif teacher_w <= 0.0:
+                    next_input = vae_latent_t.detach()
+                else:
+                    next_input = teacher_w * gt_t + (1 - teacher_w) * vae_latent_t.detach() # (b, 1, vae_latent_size)
+
+                next_input_embeds = self.vae_to_t5(next_input)  # (b, 1, t5_d_model)
+                decoder_inputs_embeds = torch.cat(
+                    [decoder_inputs_embeds, next_input_embeds], dim=1
+                ) # (b, 2 + t + 1, t5_d_model)
+
+            vae_latent = torch.cat(vae_latent_list, dim=1)  # (b, l_pred, vae_latent_size)
 
         # Fix: Ensure sequence lengths match for loss computation
         min_seq_len = min(vae_latent.size(1), z_label_sequence.size(1))

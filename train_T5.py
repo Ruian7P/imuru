@@ -116,6 +116,8 @@ def train():
 
     parser.add_argument('--style_noise', type=float, default=0, help='How much noise add to style sequence during training')
     parser.add_argument('--label_noise', type=float, default=0, help='How much noise add to label sequence during training')
+    parser.add_argument('--teacher_p', type=float, default=1.0, help='Probability of using teacher forcing during training')
+    parser.add_argument('--teacher_w', type=float, default=1.0, help='Weight of teacher forcing during training')
     parser.add_argument('--training_type', type=str, default='pretrain', help='Pre-training or long lines finetune', choices=['pretrain', 'finetune'])
 
     args = parser.parse_args()
@@ -258,7 +260,7 @@ def train():
                 label_imgs = batch['label_img'].to(weight_dtype)
                 input_ids = batch['input_ids'].long()
 
-                loss, _, _ = model(images, label_img=label_imgs, input_ids=input_ids, attention_mask=batch['attention_mask'], style_noise=args.style_noise, label_noise=args.label_noise)
+                loss, _, _ = model(images, label_img=label_imgs, input_ids=input_ids, attention_mask=batch['attention_mask'], style_noise=args.style_noise, label_noise=args.label_noise, teacher_p=args.teacher_p, teacher_w=args.teacher_w)
 
                 if not torch.isfinite(loss):
                     logger.warning("non-finite loss")
