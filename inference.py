@@ -18,9 +18,9 @@ model = AutoModel.from_pretrained(model_path, trust_remote_code=True)
 model.cuda()  # Move to GPU if available
 
 # 2. Prepare your inputs
-style_text = 'THE JOLLY IS "U"'
-gen_text = 'Ruian7P'
-img_path = "./dataset/sample/sample.png"
+style_text = 'U-I nsHttpChannel Chautauqua'
+gen_text = 'WAR x99 Zarqawi 606'
+img_path = "/home/ruian7p/Projects/Emuru/dataset/sample/20M_sample.png"
 style_img = load_image(img_path)
 style_img = style_img.cuda()
 
@@ -33,4 +33,4 @@ generated_pil_image = model.generate(
 )
 
 # 4. Save the result
-generated_pil_image.save(model_path + "/generated_image.png")
+generated_pil_image.save(model_path + "/generated_20M_image.png")

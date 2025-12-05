@@ -295,7 +295,7 @@ class ours_DataLoaderManager:
             .decode("pil")
             .map(lambda sample: {
                 "style.png": transform(sample["style.rgb.png"].convert('RGB')),
-                "gen.png": transform(sample["gen.bw.png"].convert('L')),
+                "gen.png": transform(sample["gen.bw.png"].convert('RGB')),
                 'json': sample['json'],
                 'encoded_text': self.alphabet.encode(sample['json']['gen_text']),
             })

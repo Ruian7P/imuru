@@ -65,7 +65,6 @@ def karaoke_test(karaoke_loader, model, accelerator, weight_dtype, wandb_prefix=
 
             if i == 0:
                 generated_pil_image = model.generate(
-                    style_text=style_img_text[0],
                     gen_text=gen_text,
                     style_img=style_img,
                     max_new_tokens=64
@@ -176,8 +175,8 @@ def train():
     )
 
     if args.training_type == 'pretrain':
-        train_pattern = ("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-pretrain-20M/resolve/main/tars/{000000..000498}.tar")
-        eval_pattern = ("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-pretrain-20M/resolve/main/tars/{000499..000499}.tar")
+        train_pattern = ("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-pretrain-20M/resolve/main/{000000..00000498}.tar")
+        eval_pattern = ("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-pretrain-20M/resolve/main/{000499..000499}.tar")
         NUM_SAMPLES_TRAIN = 10_000 * 499
         NUM_SAMPLES_EVAL = 10_000
     elif args.training_type == 'finetune':
