@@ -175,7 +175,7 @@ def train():
     )
 
     if args.training_type == 'pretrain':
-        train_pattern = ("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-pretrain-20M/resolve/main/{000000..00000498}.tar")
+        train_pattern = ("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-pretrain-20M/resolve/main/{000000..000498}.tar")
         eval_pattern = ("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-pretrain-20M/resolve/main/{000499..000499}.tar")
         NUM_SAMPLES_TRAIN = 10_000 * 499
         NUM_SAMPLES_EVAL = 10_000
