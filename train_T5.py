@@ -109,6 +109,7 @@ def train():
     parser.add_argument("--vae_path", type=str, default="blowing-up-groundhogs/emuru_vae", help='vae checkpoint path')
     parser.add_argument("--t5_size", type=str, default="large", help='t5 model size', choices=['small', 'base', 'large', '3b', '11b'])
     parser.add_argument("--style_enc", type=str, default="mean", choices=['mean', 'MLP', 'MLP2'])
+    parser.add_argument("--use_start_latent", type=str, default="True", help="Whether to use start latent token in T5 decoder")
 
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--mixed_precision", type=str, default="no")
@@ -160,7 +161,9 @@ def train():
         vae_name_or_path=args.vae_path,
         tokenizer_name_or_path='google/byt5-small',
         slices_per_query=1,
-        vae_channels=1
+        vae_channels=1,
+        style_enc=args.style_enc,
+        use_start_latent=args.use_start_latent,
     )
     model = Emuru(emuru_config)
 

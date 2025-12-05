@@ -9,6 +9,7 @@ python train_T5.py \
     --teacher_p 1.0 \
     --teacher_w 1.0 \
     --style_enc "MLP" \
+    --use_start_latent "True" \
     --vae_path "blowing-up-groundhogs/emuru_vae" \
     --report_to "wandb" \
     --wandb_entity "emuru" \

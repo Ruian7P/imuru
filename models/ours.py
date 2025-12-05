@@ -20,6 +20,7 @@ class EmuruConfig(PretrainedConfig):
                  slices_per_query=1,
                  vae_channels=1,
                  style_enc="mean",
+                 use_start_latent="True",
                  **kwargs):
         super().__init__(**kwargs)
         self.t5_name_or_path = t5_name_or_path
@@ -28,6 +29,7 @@ class EmuruConfig(PretrainedConfig):
         self.slices_per_query = slices_per_query
         self.vae_channels = vae_channels
         self.style_enc = style_enc
+        self.use_start_latent = use_start_latent
 
 class Emuru(PreTrainedModel):
     """
@@ -84,6 +86,12 @@ class Emuru(PreTrainedModel):
                 nn.SiLU(),
                 nn.Linear(vae_latent_size, 1)
             )
+
+        self.use_start_latent = config.use_start_latent if hasattr(config, 'use_start_latent') else "True"
+        if self.use_start_latent.lower() == "true":
+            self.use_start_latent = True
+        else:
+            self.use_start_latent = False
 
         self.mse_criterion = nn.MSELoss()
         self.init_weights()
@@ -211,8 +219,12 @@ class Emuru(PreTrainedModel):
 
             output = self.T5(input_ids, attention_mask=attention_mask, decoder_inputs_embeds=decoder_inputs_embeds) # (b, 2+l_pred -1, t5_d_model)
             all_vae_latent = self.t5_to_vae(output.logits) # (b, 2 + l_pred -1, vae_latent_size)
-            vae_latent = all_vae_latent[:, 2:, :]  # Remove sos and style token (b, l_pred -1, vae_latent_size)
-            z_label_sequence = z_label_sequence[:, 1:, :]
+
+            if self.use_start_latent:
+                vae_latent = all_vae_latent[:, 1:, :] # [z_0, ..., z_{l_pred -1}] (b, l_pred, vae_latent_size)
+            else:
+                vae_latent = all_vae_latent[:, 2:, :]  # Remove sos and style token (b, l_pred -1, vae_latent_size) [z_1, ..., z_{l_pred -1}]
+                z_label_sequence = z_label_sequence[:, 1:, :] # [z_1, ..., z_{l_pred -1}]
         else:
             seq_len = z_label_sequence_noisy.size(1)
             decoder_inputs_embeds = torch.cat(
