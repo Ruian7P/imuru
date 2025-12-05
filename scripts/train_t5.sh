@@ -5,6 +5,7 @@ python train_T5.py \
     --mixed_precision fp16 \
     --t5_size "small" \
     --teacher_noise 0.0 \
+    --style_enc "MLP" \
     --vae_path "blowing-up-groundhogs/emuru_vae" \
     --report_to "wandb" \
     --wandb_entity "emuru" \

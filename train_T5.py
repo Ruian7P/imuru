@@ -109,6 +109,7 @@ def train():
 
     parser.add_argument("--vae_path", type=str, default="blowing-up-groundhogs/emuru_vae", help='vae checkpoint path')
     parser.add_argument("--t5_size", type=str, default="large", help='t5 model size', choices=['small', 'base', 'large', '3b', '11b'])
+    parser.add_argument("--style_enc", type=str, default="mean", choices=['mean', 'MLP', 'MLP2'])
 
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--mixed_precision", type=str, default="no")
