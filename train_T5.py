@@ -29,8 +29,9 @@ def validation(eval_loader, model, accelerator, weight_dtype, len_eval_loader, w
         with accelerator.autocast():
             images = batch['img'].to(weight_dtype)
             input_ids = batch['input_ids'].long()
+            label_imgs = batch['label_img'].to(weight_dtype)
 
-            loss, _, _ = model(images, input_ids=input_ids, attention_mask=batch['attention_mask'])
+            loss, _, _ = model(images, label_img=label_imgs, input_ids=input_ids, attention_mask=batch['attention_mask'])
             eval_loss += loss.item()
 
     accelerator.log({f"{wandb_prefix}/loss": eval_loss / len_eval_loader,})
@@ -52,11 +53,14 @@ def karaoke_test(karaoke_loader, model, accelerator, weight_dtype, wandb_prefix=
             style_img_text = batch['style_imgs_text'][0]
             gen_text = batch['gen_text'][0]
 
-            res = model.tokenizer(style_img_text, return_tensors='pt', padding=True, return_attention_mask=True, return_length=True)
+            res = model.tokenizer(gen_text, return_tensors='pt', padding=True, return_attention_mask=True, return_length=True)
             style_img = F.to_tensor(batch['style_imgs'][0][0])
             style_img = F.normalize(style_img, [0.5], [0.5]).cuda()[None].to(weight_dtype)
 
-            loss, _, _ = model(style_img, input_ids=res['input_ids'].cuda().long(), attention_mask=res['attention_mask'].cuda())
+            label_img = batch['gen_img']
+            label_img = F.normalize(label_img, [0.5], [0.5]).cuda().to(weight_dtype)
+
+            loss, _, _ = model(style_img, label_img=label_img, input_ids=res['input_ids'].cuda().long(), attention_mask=res['attention_mask'].cuda())
             eval_loss += loss.item()
 
             if i == 0:
@@ -253,7 +257,7 @@ def train():
                 label_imgs = batch['label_img'].to(weight_dtype)
                 input_ids = batch['input_ids'].long()
 
-                loss, _, _ = model(images, label_imgs=label_imgs, input_ids=input_ids, attention_mask=batch['attention_mask'], noise=args.teacher_noise)
+                loss, _, _ = model(images, label_img=label_imgs, input_ids=input_ids, attention_mask=batch['attention_mask'], noise=args.teacher_noise)
 
                 if not torch.isfinite(loss):
                     logger.warning("non-finite loss")
