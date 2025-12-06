@@ -13,24 +13,24 @@ def load_image(img_path):
     return img
 
 # 1. Load the model
-model_path = "./results/t5_small_2e-5_ech5"
+model_path = "./results/ours_t5_small_2e-5_ech5"
 model = AutoModel.from_pretrained(model_path, trust_remote_code=True)
 model.cuda()  # Move to GPU if available
 
 # 2. Prepare your inputs
-style_text = 'U-I nsHttpChannel Chautauqua'
-gen_text = 'WAR x99 Zarqawi 606'
-img_path = "/home/ruian7p/Projects/Emuru/dataset/sample/20M_sample.png"
+style_text = ''
+gen_text = 'Ruian7P'
+img_path = "/home/ruian7p/Projects/Emuru/dataset/sample/sample.png"
 style_img = load_image(img_path)
 style_img = style_img.cuda()
 
 # 3. Generate an image
 generated_pil_image = model.generate(
-    style_text=style_text,
+    # style_text=style_text,
     gen_text=gen_text,
     style_img=style_img,
     max_new_tokens=64
 )
 
 # 4. Save the result
-generated_pil_image.save(model_path + "/generated_20M_image.png")
+generated_pil_image.save(model_path + "/generated_sample.png")

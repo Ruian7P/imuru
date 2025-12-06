@@ -20,7 +20,6 @@ class EmuruConfig(PretrainedConfig):
                  slices_per_query=1,
                  vae_channels=1,
                  style_enc="mean",
-                 use_start_latent="True",
                  **kwargs):
         super().__init__(**kwargs)
         self.t5_name_or_path = t5_name_or_path
@@ -29,7 +28,6 @@ class EmuruConfig(PretrainedConfig):
         self.slices_per_query = slices_per_query
         self.vae_channels = vae_channels
         self.style_enc = style_enc
-        self.use_start_latent = use_start_latent
 
 class Emuru(PreTrainedModel):
     """
@@ -88,12 +86,8 @@ class Emuru(PreTrainedModel):
                 nn.Linear(vae_latent_size, 1)
             )
 
-        self.use_start_latent = config.use_start_latent if hasattr(config, 'use_start_latent') else "True"
-        print(f"Using start latent token: {self.use_start_latent}")
-        if self.use_start_latent.lower() == "true":
-            self.use_start_latent = True
-        else:
-            self.use_start_latent = False
+        self.gamma_proj = nn.Linear(vae_latent_size, t5_config.d_model)
+        self.beta_proj = nn.Linear(vae_latent_size, t5_config.d_model)
 
         self.mse_criterion = nn.MSELoss()
         self.init_weights()
@@ -165,8 +159,6 @@ class Emuru(PreTrainedModel):
         attention_mask: Optional[torch.Tensor] = None,
         style_noise: float = 0,
         label_noise: float = 0,
-        teacher_p: float = 1.0,
-        teacher_w: float = 1.0,
         **kwargs: Any
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
@@ -197,13 +189,18 @@ class Emuru(PreTrainedModel):
             style_scores = self.style_encoder(z_style_sequence)  # (b, w, 1)
             style_weights = torch.softmax(style_scores, dim=1)  # (b, w, 1)
             style_global = (z_style_sequence * style_weights).sum(dim=1, keepdim=True)  # (b, 1, d)
-        elif self.style_enc == "full":
-            style_global = z_style_sequence  # (b, w, d)
         else:
             raise ValueError(f"Unknown style_enc type: {self.style_enc}")
         
-        w_style = style_global.size(1)
-        style_token_embed = self.vae_to_t5(style_global)  # (b, 1, t5_d_model)
+        # text encoding
+        text_encoder_outputs = self.T5.encoder(input_ids=input_ids, attention_mask=attention_mask)
+        text_hidden_states = text_encoder_outputs.last_hidden_state
+        
+        # prepare for decoder input
+        gamma = self.gamma_proj(style_global)  # (b, 1, t5_d_model)
+        beta = self.beta_proj(style_global)    # (b, 1, t5_d_model)
+        text_hidden_states = text_hidden_states * (1 + gamma) + beta  # (b, w, t5_d_model)
+        text_encoder_outputs.last_hidden_state = text_hidden_states
 
         posterior_label = self.vae.encode(label_img.float())
         z_label = posterior_label.latent_dist.sample()
@@ -215,55 +212,14 @@ class Emuru(PreTrainedModel):
             z_label_sequence_noisy = z_label_sequence
 
         sos = repeat(self.sos.weight, '1 d -> b 1 d', b=input_ids.size(0))
+     
+        label_embeds = self.vae_to_t5(z_label_sequence_noisy)  # (b, w, t5_d_model)
+        decoder_inputs_embeds = torch.cat(
+            [sos, label_embeds[:, :-1]], dim=1
+        ) # (b, 1 + w - 1, t5_d_model)
 
-        if teacher_p >= 1.0 and teacher_w >= 1.0:        
-            label_embeds = self.vae_to_t5(z_label_sequence_noisy)  # (b, w, t5_d_model)
-            decoder_inputs_embeds = torch.cat(
-                [sos, style_token_embed, label_embeds[:, :-1]], dim=1
-            ) # (b, 1 + 1 + w - 1, t5_d_model)
-
-            output = self.T5(input_ids, attention_mask=attention_mask, decoder_inputs_embeds=decoder_inputs_embeds) # (b, 2+l_pred -1, t5_d_model)
-            all_vae_latent = self.t5_to_vae(output.logits) # (b, 2 + l_pred -1, vae_latent_size)
-
-            if self.use_start_latent:
-                vae_latent = all_vae_latent[:, 1:, :] # [z_0, ..., z_{l_pred -1}] (b, l_pred, vae_latent_size)
-            else:
-                vae_latent = all_vae_latent[:, 2:, :]  # Remove sos and style token (b, l_pred -1, vae_latent_size) [z_1, ..., z_{l_pred -1}]
-                z_label_sequence = z_label_sequence[:, 1:, :] # [z_1, ..., z_{l_pred -1}]
-        else:
-            seq_len = z_label_sequence_noisy.size(1)
-            decoder_inputs_embeds = torch.cat(
-                [sos, style_token_embed], dim=1
-            ) # (b, 1 + 1, t5_d_model)
-
-            vae_latent_list = []
-
-            for t in range(seq_len):
-                output = self.T5(input_ids, attention_mask=attention_mask, decoder_inputs_embeds=decoder_inputs_embeds) # (b, 2+i, t5_d_model)
-                last_hidden = output.logits[:, -1:, :]  # (b, 1, t5_d_model)
-                vae_latent_t = self.t5_to_vae(last_hidden) # (b, 1, vae_latent_size)
-                vae_latent_list.append(vae_latent_t)
-
-                gt_t = z_label_sequence_noisy[:, t:t+1, :]  # (b, 1, vae_latent_size)
-
-                if teacher_w >= 1.0:
-                    if teacher_p <= 0.0:
-                        next_input = vae_latent_t.detach()
-                    else:
-                        mask = (torch.rand_like(gt_t[..., :1]) < teacher_p).to(vae_latent_t.dtype)  # (b, 1, 1)
-                        next_input = mask * gt_t + (1 - mask) * vae_latent_t.detach()
-                
-                elif teacher_w <= 0.0:
-                    next_input = vae_latent_t.detach()
-                else:
-                    next_input = teacher_w * gt_t + (1 - teacher_w) * vae_latent_t.detach() # (b, 1, vae_latent_size)
-
-                next_input_embeds = self.vae_to_t5(next_input)  # (b, 1, t5_d_model)
-                decoder_inputs_embeds = torch.cat(
-                    [decoder_inputs_embeds, next_input_embeds], dim=1
-                ) # (b, 2 + t + 1, t5_d_model)
-
-            vae_latent = torch.cat(vae_latent_list, dim=1)  # (b, l_pred, vae_latent_size)
+        output = self.T5(encoder_outputs=text_encoder_outputs, attention_mask=attention_mask, decoder_inputs_embeds=decoder_inputs_embeds) # (b, 1+l_pred -1, t5_d_model)
+        vae_latent = self.t5_to_vae(output.logits) # (b, 1 + l_pred -1, vae_latent_size)
 
         # Fix: Ensure sequence lengths match for loss computation
         min_seq_len = min(vae_latent.size(1), z_label_sequence.size(1))
@@ -385,7 +341,15 @@ class Emuru(PreTrainedModel):
         else:
             raise ValueError(f"Unknown style_enc type: {self.style_enc}")
         
-        style_token_embed = self.vae_to_t5(style_global)  # (b, 1, t5_d_model)
+        # text encoding
+        text_encoder_outputs = self.T5.encoder(input_ids=input_ids)
+        text_hidden_states = text_encoder_outputs.last_hidden_state
+        
+        # prepare for decoder input
+        gamma = self.gamma_proj(style_global)  # (b, 1, t5_d_model)
+        beta = self.beta_proj(style_global)    # (b, 1, t5_d_model)
+        text_hidden_states = text_hidden_states * (1 + gamma) + beta  # (b, w, t5_d_model)
+        text_encoder_outputs.last_hidden_state = text_hidden_states
 
         # prepare for decoder input
         sos = repeat(self.sos.weight, '1 d -> b 1 d', b=input_ids.size(0))
@@ -396,13 +360,13 @@ class Emuru(PreTrainedModel):
 
         for step in range(max_new_tokens):
             if len(generated_latents) == 0:
-                decoder_inputs_embeds = torch.cat([sos, style_token_embed], dim=1) # (b, 2, t5_d_model)
+                decoder_inputs_embeds = sos # (b, 1, t5_d_model)
             else:
                 lat_seq = torch.stack(generated_latents, dim=1)  # (b, t, vae_latent_size)
                 lat_embeds = self.vae_to_t5(lat_seq)  # (b, t, t5_d_model)
-                decoder_inputs_embeds = torch.cat([sos, style_token_embed, lat_embeds], dim=1) # (b, 2 + t, t5_d_model)
+                decoder_inputs_embeds = torch.cat([sos, lat_embeds], dim=1) # (b, 1 + t, t5_d_model)
         
-            output = self.T5(input_ids, decoder_inputs_embeds=decoder_inputs_embeds)
+            output = self.T5(encoder_outputs=text_encoder_outputs, decoder_inputs_embeds=decoder_inputs_embeds)
             last_hidden = output.logits[:, -1:, :]  # (b, 1, t5_d_model)
             vae_latent = self.t5_to_vae(last_hidden)[:, 0, :]  # (b, vae_latent_size)
 
