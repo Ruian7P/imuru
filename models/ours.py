@@ -197,12 +197,9 @@ class Emuru(PreTrainedModel):
             style_scores = self.style_encoder(z_style_sequence)  # (b, w, 1)
             style_weights = torch.softmax(style_scores, dim=1)  # (b, w, 1)
             style_global = (z_style_sequence * style_weights).sum(dim=1, keepdim=True)  # (b, 1, d)
-        elif self.style_enc == "full":
-            style_global = z_style_sequence  # (b, w, d)
         else:
             raise ValueError(f"Unknown style_enc type: {self.style_enc}")
         
-        w_style = style_global.size(1)
         style_token_embed = self.vae_to_t5(style_global)  # (b, 1, t5_d_model)
 
         posterior_label = self.vae.encode(label_img.float())
