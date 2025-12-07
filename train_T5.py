@@ -16,7 +16,7 @@ from transformers.optimization import get_scheduler
 
 from utils import TrainState
 from custom_datasets import ours_DataLoaderManager
-from models.ours_condition import Emuru, EmuruConfig
+from models.ours_head import Emuru, EmuruConfig
 
 
 @torch.no_grad()
@@ -108,7 +108,7 @@ def train():
 
     parser.add_argument("--vae_path", type=str, default="blowing-up-groundhogs/emuru_vae", help='vae checkpoint path')
     parser.add_argument("--t5_size", type=str, default="large", help='t5 model size', choices=['small', 'base', 'large', '3b', '11b'])
-    parser.add_argument("--style_enc", type=str, default="mean", choices=['mean', 'MLP', 'MLP2'])
+    parser.add_argument("--style_enc", type=str, default="mean", choices=['mean', 'MLP', 'MLP2', 'full'])
 
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--mixed_precision", type=str, default="no")
