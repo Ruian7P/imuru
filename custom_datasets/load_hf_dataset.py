@@ -103,6 +103,87 @@ class T5Collate:
         res['img'] = DataProcessor.pad_images([sample['rgb.png'] for sample in batch])
         return res
     
+        
+class ours_VAECollate:
+    """
+    Collate for font-square-pretrain-20M.
+    Uses gen.rgb.png / gen.bw.png and json['gen_text'].
+    """
+    def __init__(self, alphabet):
+        self.alphabet = alphabet
+
+    def __call__(self, batch):
+        rgb_imgs = []
+        bw_imgs = []
+        writer_ids = []
+        encoded_texts = []
+        texts_len = []
+
+        for sample in batch:
+            j = sample["json"]
+            writer_id = j["writer_id"]
+
+            # ----- 1) gen -----
+            gen_text = j["gen_text"]
+            gen_rgb = sample["gen.rgb.png"]   # (3,H,W)
+            gen_bw  = sample["gen.bw.png"]    # (1,H,W)
+
+            rgb_imgs.append(gen_rgb)
+            bw_imgs.append(gen_bw)
+            writer_ids.append(writer_id)
+
+            gen_encoded = torch.LongTensor(self.alphabet.encode(gen_text))
+            encoded_texts.append(gen_encoded)
+            texts_len.append(len(gen_text))
+
+            # ----- 2) style  -----
+            style_text = j["style_text"]
+            style_rgb = sample["style.rgb.png"]
+            style_bw  = sample["style.bw.png"]
+
+            rgb_imgs.append(style_rgb)
+            bw_imgs.append(style_bw)
+            writer_ids.append(writer_id)
+
+            style_encoded = torch.LongTensor(self.alphabet.encode(style_text))
+            encoded_texts.append(style_encoded)
+            texts_len.append(len(style_text))
+
+        rgb_imgs_padded = DataProcessor.pad_images_fixed(rgb_imgs)
+        bw_imgs_padded  = DataProcessor.pad_images_fixed(bw_imgs)
+
+        # add SOS/EOS and pad
+        text_logits_s2s = [
+            torch.cat(
+                [
+                    torch.LongTensor([self.alphabet.sos]),
+                    enc,
+                    torch.LongTensor([self.alphabet.eos]),
+                ]
+            )
+            for enc in encoded_texts
+        ]
+
+        text_logits_s2s = pad_sequence(
+            text_logits_s2s, batch_first=True, padding_value=self.alphabet.pad
+        )
+
+        texts_len = torch.LongTensor(texts_len)
+
+        tgt_key_mask = subsequent_mask(text_logits_s2s.shape[-1] - 1)
+        tgt_key_padding_mask = text_logits_s2s == self.alphabet.pad
+
+        return {
+            "rgb": rgb_imgs_padded,
+            "bw": bw_imgs_padded,
+            "writer_id": torch.tensor(writer_ids),
+            "text_logits_s2s": text_logits_s2s,
+            "texts_len": texts_len,
+            "tgt_key_mask": tgt_key_mask,
+            "tgt_key_padding_mask": tgt_key_padding_mask,
+        }
+
+
 class ours_T5Collate:
     def __init__(self, tokenizer):
         self.tokenizer = tokenizer
@@ -272,9 +353,9 @@ class ours_DataLoaderManager:
             transforms.ToTensor(),
             transforms.Normalize([0.5], [0.5])
         ])
-        collate_fn: Union[VAECollate, WIDCollate, ours_T5Collate]
+        collate_fn: Union[ours_VAECollate, WIDCollate, ours_T5Collate]
         if model_type == 'vae' or model_type == 'htr':
-            collate_fn = VAECollate(self.alphabet)
+            collate_fn = ours_VAECollate(self.alphabet)
         elif model_type == 'wid':
             collate_fn = WIDCollate()
         elif model_type == 't5':
@@ -290,16 +371,30 @@ class ours_DataLoaderManager:
             raise ValueError(f"Invalid split: {split}")
         
         shuffle = 100 if split == 'train' else 0
-        dataset = (
-            wds.WebDataset(pattern,  nodesplitter=wds.split_by_node, shardshuffle=shuffle)
-            .decode("pil")
-            .map(lambda sample: {
-                "style.png": transform(sample["style.rgb.png"].convert('RGB')),
-                "gen.png": transform(sample["gen.bw.png"].convert('RGB')),
-                'json': sample['json'],
-                'encoded_text': self.alphabet.encode(sample['json']['gen_text']),
-            })
-        )
+        if model_type == "vae":
+            dataset = (
+                wds.WebDataset(pattern,  nodesplitter=wds.split_by_node, shardshuffle=shuffle, handler=wds.handlers.warn_and_continue)
+                .decode("pil")
+                .map(lambda sample: {
+                    "gen.rgb.png": transform(sample["gen.rgb.png"].convert("RGB")),
+                    "gen.bw.png":  transform(sample["gen.bw.png"].convert("L")),
+                    "style.rgb.png": transform(sample["style.rgb.png"].convert("RGB")),
+                    "style.bw.png":  transform(sample["style.bw.png"].convert("L")),
+                    "json": sample["json"],
+                    "encoded_text": self.alphabet.encode(sample["json"]["gen_text"]),
+                })
+            )
+        else:
+            dataset = (
+                wds.WebDataset(pattern,  nodesplitter=wds.split_by_node, shardshuffle=shuffle)
+                .decode("pil")
+                .map(lambda sample: {
+                    "style.png": transform(sample["style.rgb.png"].convert('RGB')),
+                    "gen.png": transform(sample["gen.bw.png"].convert('RGB')),
+                    'json': sample['json'],
+                    'encoded_text': self.alphabet.encode(sample['json']['gen_text']),
+                })
+            )
         
         return DataLoader(
             dataset, 

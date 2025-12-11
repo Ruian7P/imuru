@@ -1,12 +1,13 @@
 python -W ignore train_vae.py \
     --htr_path "pretrained_models/emuru_vae_htr" \
     --writer_id_path "pretrained_models/emuru_vae_writer_id" \
-    --train_batch_size 128 \
-    --epochs 4 \
+    --train_batch_size 64 \
+    --epochs 2 \
     --lr 5e-5 \
     --mixed_precision fp16 \
-    --keep_background True \
     --report_to "wandb" \
     --wandb_entity "emuru" \
-    --wandb_project_name "emuru_vae" \
-    --wandb_log_interval_steps 100
+    --wandb_project_name "ours_vae" \
+    --wandb_log_interval_steps 100 \
+    --disable_writer_id_loss \
+    --resume_id abcd
