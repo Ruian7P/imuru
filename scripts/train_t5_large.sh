@@ -1,7 +1,7 @@
 python train_T5.py \
-    --train_batch_size 8 \
+    --train_batch_size 32 \
     --epochs 5 \
-    --lr 1e-5 \
+    --lr 2e-5 \
     --mixed_precision fp16 \
     --t5_size "large" \
     --style_noise 0.0 \
@@ -9,7 +9,7 @@ python train_T5.py \
     --teacher_p 1.0 \
     --teacher_w 1.0 \
     --style_enc "full" \
-    --max_width 768 \
+    --max_width 1024 \
     --vae_path "blowing-up-groundhogs/emuru_vae" \
     --report_to "wandb" \
     --wandb_entity "emuru" \

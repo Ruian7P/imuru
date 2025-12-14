@@ -21,10 +21,14 @@ class DataProcessor:
     """Handles data loading and processing operations"""
     
     @staticmethod
-    def pad_images(images, padding_value=1):
+    def pad_images(images, padding_value=1, max_width=None):
         """Pad images to same width for batching"""
         images = [rearrange(img, 'c h w -> w c h') for img in images]
-        return rearrange(pad_sequence(images, padding_value=padding_value), 'w b c h -> b c h w')
+        batch = rearrange(pad_sequence(images, padding_value=padding_value), 'w b c h -> b c h w')
+
+        if max_width is not None and batch.size(-1) > max_width:
+            batch = batch[:, :, :, :max_width]  # Crop if too wide
+        return batch
     
     @staticmethod
     def pad_images_fixed(images, max_width=768, padding_value=1):
@@ -149,12 +153,8 @@ class ours_T5Collate:
         txts = [sample['json']['gen_text'] for sample in batch]
         res = self.tokenizer(txts, padding=True, return_tensors='pt', return_attention_mask=True, return_length=True)
 
-        if self.max_width is not None:
-            res['img'] = DataProcessor.pad_images_fixed([sample['style.png'] for sample in batch], max_width=self.max_width)
-            res['label_img'] = DataProcessor.pad_images_fixed([sample['gen.png'] for sample in batch], max_width=self.max_width)
-        else:
-            res['img'] = DataProcessor.pad_images([sample['style.png'] for sample in batch])
-            res['label_img'] = DataProcessor.pad_images([sample['gen.png'] for sample in batch])
+        res['img'] = DataProcessor.pad_images([sample['style.png'] for sample in batch], max_width=self.max_width)
+        res['label_img'] = DataProcessor.pad_images([sample['gen.png'] for sample in batch], max_width=self.max_width)
         return res
 
 
