@@ -223,7 +223,6 @@ def train():
         accelerator.init_trackers(args.wandb_project_name, tracker_config, wandb_args)
 
     num_steps_per_epoch = math.ceil(NUM_SAMPLES_TRAIN / (args.train_batch_size * args.gradient_accumulation_steps))
-    args.max_train_steps = args.epochs * num_steps_per_epoch
     total_batch_size = (args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps)
 
     args.emuru_params = sum([p.numel() for p in model.parameters()])
@@ -246,6 +245,9 @@ def train():
             logger.info(f"  Resuming from checkpoint at epoch {train_state.epoch}")
         except FileNotFoundError as e:
             logger.warning(f"  Checkpoint not found: {e}. Creating a new run")
+
+    remaining_epochs = max(0, args.epochs - train_state.epoch)
+    args.max_train_steps = num_steps_per_epoch * remaining_epochs + train_state.global_step
 
     progress_bar = tqdm(range(train_state.global_step, args.max_train_steps), disable=not accelerator.is_local_main_process)
     progress_bar.set_description("Steps")

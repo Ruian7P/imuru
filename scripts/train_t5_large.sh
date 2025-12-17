@@ -1,5 +1,5 @@
 python train_T5.py \
-    --train_batch_size 32 \
+    --train_batch_size 64 \
     --epochs 5 \
     --lr 2e-5 \
     --mixed_precision fp16 \
@@ -14,4 +14,5 @@ python train_T5.py \
     --report_to "wandb" \
     --wandb_entity "emuru" \
     --wandb_project_name "ours_t5_large" \
-    --wandb_log_interval_steps 100
+    --wandb_log_interval_steps 100 \
+    --resume_id e493
