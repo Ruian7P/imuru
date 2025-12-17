@@ -241,6 +241,9 @@ def train():
     if args.resume_id:
         try:
             accelerator.load_state()
+            for pg in optimizer.param_groups:
+                pg['lr'] = args.lr
+
             accelerator.project_configuration.iteration = train_state.epoch
             logger.info(f"  Resuming from checkpoint at epoch {train_state.epoch}")
         except FileNotFoundError as e:
