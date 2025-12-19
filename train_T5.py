@@ -180,16 +180,15 @@ def train():
     )
 
     if args.training_type == 'pretrain':
-        train_pattern = ("./dataset/font-square-pretrain-20M/{000000..000498}.tar")
-        eval_pattern = ("./dataset/font-square-pretrain-20M/{000499..000499}.tar")
+        train_pattern = ("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-pretrain-20M/resolve/main/{000000..000498}.tar")
+        eval_pattern = ("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-pretrain-20M/resolve/main/{000499..000499}.tar")
         NUM_SAMPLES_TRAIN = 10_000 * 499
         NUM_SAMPLES_EVAL = 10_000
     elif args.training_type == 'finetune':
-        # train_pattern = ("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-v2/resolve/main/tars/fine_tune/{000000..000048}.tar")
-        # eval_pattern = ("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-v2/resolve/main/tars/fine_tune/{000049..000049}.tar")
-        # NUM_SAMPLES_TRAIN = 10_000 * 49
-        # NUM_SAMPLES_EVAL = 10_000
-        raise NotImplementedError("Finetune dataset is not prepared yet.")
+        train_pattern = ("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-pairs-ft/resolve/main/{000000..000048}.tar")
+        eval_pattern = ("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-pairs-ft/resolve/main/{000049..000049}.tar")
+        NUM_SAMPLES_TRAIN = 10_000 * 49
+        NUM_SAMPLES_EVAL = 10_000
     else:
         raise ValueError(f"Invalid training type: {args.training_type}")
 

@@ -221,4 +221,5 @@ HWD/
 dataset/IAM/
 dataset/sample/
 dataset/font-square-pretrain-20M/
+dataset/font-square-pairs-ft/
 saved_iam_data/

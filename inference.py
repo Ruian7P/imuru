@@ -13,7 +13,7 @@ def load_image(img_path):
     return img
 
 # 1. Load the model
-model_path = "./results/head_t5_large_2e-5_ech3"
+model_path = "./results/head_t5_large_2e-5_ech5"
 model = AutoModel.from_pretrained(model_path, trust_remote_code=True)
 model.cuda()  # Move to GPU if available
 
