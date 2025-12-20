@@ -1,4 +1,4 @@
-# Imuru: Style-Image-Only Autoregressive Handwritten Text Generation
+# Imuru: Image-Only Style Transfer for Autoregressive Handwritten Text Generation
 
 
 
