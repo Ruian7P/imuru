@@ -1,0 +1,10 @@
+python train_T5.py \
+    --train_batch_size 32 \
+    --epochs 5 \
+    --lr 2e-5 \
+    --mixed_precision fp16 \
+    --t5_size "large" \
+    --style_noise 0.0 \
+    --label_noise 0.1 \
+    --style_enc "full" \
+    --vae_path "blowing-up-groundhogs/emuru_vae" \

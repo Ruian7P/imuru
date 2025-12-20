@@ -17,7 +17,7 @@ from transformers.optimization import get_scheduler
 from utils import TrainState
 from models.htr import HTR
 from models.writer_id import WriterID
-from custom_datasets import ours_DataLoaderManager
+from custom_datasets import DataLoaderManager
 from models.autoencoder_loss import AutoencoderLoss 
 from diffusers import AutoencoderKL
 
@@ -195,7 +195,7 @@ def train():
         weight_decay=args.adam_weight_decay,
         eps=args.adam_epsilon)
 
-    data_loader = ours_DataLoaderManager(
+    data_loader = DataLoaderManager(
         train_pattern=("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-pretrain-20M/resolve/main/{000000..000499}.tar"),
         eval_pattern=("https://huggingface.co/datasets/blowing-up-groundhogs/font-square-pretrain-20M/resolve/main/{000500..000500}.tar"),
         train_batch_size=args.train_batch_size,

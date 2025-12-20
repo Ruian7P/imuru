@@ -6,8 +6,4 @@ python -W ignore train_vae.py \
     --lr 5e-5 \
     --mixed_precision fp16 \
     --report_to "wandb" \
-    --wandb_entity "emuru" \
-    --wandb_project_name "ours_vae" \
-    --wandb_log_interval_steps 100 \
     --disable_writer_id_loss \
-    --resume_id abcd

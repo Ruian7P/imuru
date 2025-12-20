@@ -1,36 +1,38 @@
+import argparse
 import torch
 from PIL import Image
 from transformers import AutoModel
-from huggingface_hub import hf_hub_download
 from torchvision.transforms import functional as F
 
 def load_image(img_path):
     img = Image.open(img_path).convert("RGB")
-    # Resize the image to have a fixed height of 64 pixels
     img = img.resize((img.width * 64 // img.height, 64))
     img = F.to_tensor(img)
     img = F.normalize(img, [0.5], [0.5])
     return img
 
-# 1. Load the model
-model_path = "./results/head_t5_large_2e-5_ech5"
-model = AutoModel.from_pretrained(model_path, trust_remote_code=True)
-model.cuda()  # Move to GPU if available
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model_path", type=str, default="Ruian7P/imuru_large")
+    parser.add_argument("--target_text", type=str, default="Never gonna make you cry")
+    parser.add_argument("--save_path", type=str, default=".")
+    parser.add_argument("--img_path", type=str, default="./dataset/sample.png")
+    args = parser.parse_args()
 
-# 2. Prepare your inputs
-style_text = 'Your beauty is beyond compare'
-gen_text = 'Never gonna make you cry'
-img_path = "/home/ruian7p/Projects/Emuru/dataset/sample/test_sample.png"
-style_img = load_image(img_path)
-style_img = style_img.cuda()
+    model = AutoModel.from_pretrained(args.model_path, trust_remote_code=True)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
 
-# 3. Generate an image
-generated_pil_image = model.generate(
-    # style_text=style_text,
-    gen_text=gen_text,
-    style_img=style_img,
-    max_new_tokens=64
-)
+    style_img = load_image(args.img_path).to(device)
 
-# 4. Save the result
-generated_pil_image.save(model_path + "/generated_test_sample.png")
+    generated_pil_image = model.generate(
+        gen_text=args.target_text,
+        style_img=style_img,
+        max_new_tokens=256
+    )
+
+    out_path = args.save_path.rstrip("/\\") + "/generated_sample.png"
+    generated_pil_image.save(out_path)
+
+if __name__ == "__main__":
+    main()

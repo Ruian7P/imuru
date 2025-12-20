@@ -15,8 +15,8 @@ from accelerate.utils import ProjectConfiguration, set_seed
 from transformers.optimization import get_scheduler
 
 from utils import TrainState
-from custom_datasets import ours_DataLoaderManager
-from models.ours_head import Emuru, EmuruConfig
+from custom_datasets import DataLoaderManager
+from models.imuru import Imuru, ImuruConfig
 
 
 @torch.no_grad()
@@ -108,7 +108,7 @@ def train():
 
     parser.add_argument("--vae_path", type=str, default="blowing-up-groundhogs/emuru_vae", help='vae checkpoint path')
     parser.add_argument("--t5_size", type=str, default="large", help='t5 model size', choices=['small', 'base', 'large', '3b', '11b'])
-    parser.add_argument("--style_enc", type=str, default="mean", choices=['mean', 'MLP', 'MLP2', 'full'])
+    parser.add_argument("--style_enc", type=str, default="full", choices=['mean', 'MLP', 'MLP2', 'full'])
     parser.add_argument("--max_width", type=int, default=None, help="max width of input image during training")
 
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
@@ -156,7 +156,7 @@ def train():
         args.output_dir.mkdir(parents=True, exist_ok=True)
         args.logging_dir.mkdir(parents=True, exist_ok=True)
 
-    emuru_config = EmuruConfig(
+    imuru_config = ImuruConfig(
         t5_name_or_path=f'google-t5/t5-{args.t5_size}',
         vae_name_or_path=args.vae_path,
         tokenizer_name_or_path='google/byt5-small',
@@ -164,7 +164,7 @@ def train():
         vae_channels=1,
         style_enc=args.style_enc,
     )
-    model = Emuru(emuru_config)
+    model = Imuru(imuru_config)
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -192,7 +192,7 @@ def train():
     else:
         raise ValueError(f"Invalid training type: {args.training_type}")
 
-    data_loader = ours_DataLoaderManager(
+    data_loader = DataLoaderManager(
         train_pattern=train_pattern,
         eval_pattern=eval_pattern,
         train_batch_size=args.train_batch_size,

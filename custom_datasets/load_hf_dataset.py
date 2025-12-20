@@ -63,7 +63,7 @@ class WIDCollate:
         }   
     
         
-class ours_VAECollate:
+class VAECollate:
     """
     Collate for font-square-pretrain-20M.
     Uses gen.rgb.png / gen.bw.png and json['gen_text'].
@@ -144,7 +144,7 @@ class ours_VAECollate:
         }
 
 
-class ours_T5Collate:
+class T5Collate:
     def __init__(self, tokenizer, max_width=None):
         self.tokenizer = tokenizer
         self.max_width = max_width
@@ -211,7 +211,7 @@ def karaoke_collate_fn(batch):
     return out
 
 
-class ours_DataLoaderManager:
+class DataLoaderManager:
     """Handles dataset creation and data loading"""
     
     def __init__(self, train_pattern: str, eval_pattern: str, train_batch_size: int, eval_batch_size: int, num_workers: int, pin_memory: bool, 
@@ -235,13 +235,13 @@ class ours_DataLoaderManager:
             transforms.ToTensor(),
             transforms.Normalize([0.5], [0.5])
         ])
-        collate_fn: Union[ours_VAECollate, WIDCollate, ours_T5Collate]
+        collate_fn: Union[VAECollate, WIDCollate, T5Collate]
         if model_type == 'vae' or model_type == 'htr':
-            collate_fn = ours_VAECollate(self.alphabet, max_width=max_width)
+            collate_fn = VAECollate(self.alphabet, max_width=max_width)
         elif model_type == 'wid':
             collate_fn = WIDCollate()
         elif model_type == 't5':
-            collate_fn = ours_T5Collate(self.tokenizer, max_width=max_width)
+            collate_fn = T5Collate(self.tokenizer, max_width=max_width)
         else:
             raise ValueError(f"Invalid model type: {model_type}")
 

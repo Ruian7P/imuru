@@ -10,8 +10,8 @@ from PIL import Image
 from transformers import PretrainedConfig
 from torchvision.utils import make_grid
 
-class EmuruConfig(PretrainedConfig):
-    model_type = "emuru"
+class ImuruConfig(PretrainedConfig):
+    model_type = "imuru"
 
     def __init__(self, 
                  t5_name_or_path='google-t5/t5-large', 
@@ -19,6 +19,7 @@ class EmuruConfig(PretrainedConfig):
                  tokenizer_name_or_path='google/byt5-small',
                  slices_per_query=1,
                  vae_channels=1,
+                 style_enc="mean",
                  **kwargs):
         super().__init__(**kwargs)
         self.t5_name_or_path = t5_name_or_path
@@ -26,10 +27,11 @@ class EmuruConfig(PretrainedConfig):
         self.tokenizer_name_or_path = tokenizer_name_or_path
         self.slices_per_query = slices_per_query
         self.vae_channels = vae_channels
+        self.style_enc = style_enc
 
-class Emuru(PreTrainedModel):
+class Imuru(PreTrainedModel):
     """
-    Emuru is a conditional generative model that integrates a T5-based decoder with a VAE
+    Imuru is a conditional generative model that integrates a T5-based decoder with a VAE
     for image generation conditioned on text and style images.
     Attributes:
         config_class (Type): Configuration class for the model.
@@ -45,13 +47,13 @@ class Emuru(PreTrainedModel):
         z_rearrange (Rearrange): Layer to rearrange T5 outputs back to VAE latent dimensions.
         mse_criterion (nn.MSELoss): Mean squared error loss function.
     """
-    config_class = EmuruConfig
+    config_class = ImuruConfig
 
-    def __init__(self, config: EmuruConfig) -> None:
+    def __init__(self, config: ImuruConfig) -> None:
         """
-        Initialize the Emuru model.
+        Initialize the Imuru model.
         Args:
-            config (EmuruConfig): Configuration object containing model hyperparameters and paths.
+            config (ImuruConfig): Configuration object containing model hyperparameters and paths.
         """
         super().__init__(config)
         
@@ -73,6 +75,17 @@ class Emuru(PreTrainedModel):
         self.query_rearrange = Rearrange('b c h (w q) -> b w (q c h)', q=config.slices_per_query)
         self.z_rearrange = Rearrange('b w (q c h) -> b c h (w q)', c=config.vae_channels, q=config.slices_per_query)
 
+        self.style_enc = config.style_enc if hasattr(config, 'style_enc') else "mean"
+        print(f"Using style encoder: {self.style_enc}")
+        if self.style_enc == "MLP": # w -> 1
+            self.style_encoder = nn.Linear(vae_latent_size, 1)
+        elif self.style_enc == "MLP2":
+            self.style_encoder = nn.Sequential(
+                nn.Linear(vae_latent_size, vae_latent_size),
+                nn.SiLU(),
+                nn.Linear(vae_latent_size, 1)
+            )
+
         self.mse_criterion = nn.MSELoss()
         self.init_weights()
 
@@ -93,15 +106,17 @@ class Emuru(PreTrainedModel):
     def forward(
         self,
         img: Optional[torch.Tensor] = None,
+        label_img: Optional[torch.Tensor] = None,
         input_ids: Optional[torch.Tensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
-        noise: float = 0,
+        style_noise: float = 0,
+        label_noise: float = 0,
         **kwargs: Any
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass of the model.
         Args:
-            img (Optional[torch.Tensor]): Input image tensor.
+            img (Optional[torch.Tensor]): Input Style image tensor.
             input_ids (Optional[torch.Tensor]): Tokenized input IDs.
             attention_mask (Optional[torch.Tensor]): Attention mask for the inputs.
             noise (float): Amount of noise to add in image encoding.
@@ -112,24 +127,61 @@ class Emuru(PreTrainedModel):
                 - pred_latent (torch.Tensor): Predicted latent representations.
                 - z (torch.Tensor): Sampled latent vector from VAE.
         """
-        decoder_inputs_embeds, z_sequence, z = self._img_encode(img, noise)
+        assert label_img is not None, 'label_img must be provided during training'
 
-        output = self.T5(input_ids, attention_mask=attention_mask, decoder_inputs_embeds=decoder_inputs_embeds)
-        vae_latent = self.t5_to_vae(output.logits[:, :-1])
-        pred_latent = self.z_rearrange(vae_latent)
+        posterior_style = self.vae.encode(img.float())
+        z_style = posterior_style.latent_dist.sample()
+        z_style_sequence = self.query_rearrange(z_style)
+        if style_noise > 0:
+            z_style_sequence = z_style_sequence + torch.randn_like(z_style_sequence) * style_noise
 
-        # Fix: Ensure sequence lengths match for loss computation
-        min_seq_len = min(vae_latent.size(1), z_sequence.size(1))
-        vae_latent_trimmed = vae_latent[:, :min_seq_len]
-        z_sequence_trimmed = z_sequence[:, :min_seq_len]
+        if self.style_enc == "mean":
+            style_global = z_style_sequence.mean(dim=1, keepdim=True)  # (b, 1, d)
+        elif self.style_enc in ["MLP", "MLP2"]:
+            style_scores = self.style_encoder(z_style_sequence)  # (b, w, 1)
+            style_weights = torch.softmax(style_scores, dim=1)  # (b, w, 1)
+            style_global = (z_style_sequence * style_weights).sum(dim=1, keepdim=True)  # (b, 1, d)
+        elif self.style_enc == "full":
+            style_global = z_style_sequence  # (b, w, d)
+        else:
+            raise ValueError(f"Unknown style_enc type: {self.style_enc}")
         
-        mse_loss = self.mse_criterion(vae_latent_trimmed, z_sequence_trimmed)
-        return mse_loss, pred_latent, z
+        w_style = style_global.size(1)
+        style_token_embed = self.vae_to_t5(style_global)  # (b, 1, t5_d_model)
+
+        posterior_label = self.vae.encode(label_img.float())
+        z_label = posterior_label.latent_dist.sample()
+        z_label_sequence = self.query_rearrange(z_label) # (b, w, d)
+
+        if label_noise > 0:
+            z_label_sequence_noisy = z_label_sequence + torch.randn_like(z_label_sequence) * label_noise
+        else:
+            z_label_sequence_noisy = z_label_sequence
+
+        sos = repeat(self.sos.weight, '1 d -> b 1 d', b=input_ids.size(0))
+      
+        label_embeds = self.vae_to_t5(z_label_sequence_noisy)  # (b, w, t5_d_model)
+        decoder_inputs_embeds = torch.cat(
+            [style_token_embed, sos, label_embeds[:, :-1]], dim=1
+        ) # (b, w_style + 1 + (w_label -1), t5_d_model)
+
+        output = self.T5(input_ids, attention_mask=attention_mask, decoder_inputs_embeds=decoder_inputs_embeds) # (b, w_style + 1 + (w_label -1), t5_d_model)
+        all_vae_latent = self.t5_to_vae(output.logits) # (b, w_style + 1 + (w_label -1), vae_latent_size)
+
+        vae_latent = all_vae_latent[:, w_style:, :]  # (b, w_label, vae_latent_size)
+
+        min_seq_len = min(vae_latent.size(1), z_label_sequence.size(1))
+        vae_latent_trimmed = vae_latent[:, :min_seq_len]
+        z_label_sequence_trimmed = z_label_sequence[:, :min_seq_len]    
+
+        mse_loss = self.mse_criterion(vae_latent_trimmed, z_label_sequence_trimmed)
+        pred_latent = self.z_rearrange(vae_latent_trimmed)
+
+        return mse_loss, pred_latent, z_label
 
     @torch.inference_mode()
     def generate(
         self,
-        style_text: str,
         gen_text: str,
         style_img: torch.Tensor,
         **kwargs: Any
@@ -146,23 +198,20 @@ class Emuru(PreTrainedModel):
         """
         if style_img.ndim == 3:
             style_img = style_img.unsqueeze(0)
-        elif style_img.ndim == 4:
+        elif style_img.ndim == 4: # (b, c, h, w)
             pass
         else:
             raise ValueError('style_img must be 3D or 4D')
         
-        texts = [style_text + ' ' + gen_text]
-        imgs, _, img_ends = self._generate(texts=texts, imgs=style_img, **kwargs)
+        imgs, _ = self._generate(texts=[gen_text], imgs=style_img, **kwargs)
         imgs = (imgs + 1) / 2
-        return F.to_pil_image(imgs[0, ..., style_img.size(-1):img_ends.item()].detach().cpu())
+        return F.to_pil_image(imgs[0].detach().cpu())
     
     @torch.inference_mode()
     def generate_batch(
         self,
-        style_texts: List[str],
         gen_texts: List[str],
         style_imgs: torch.Tensor,
-        lengths: List[int],
         **kwargs: Any
     ) -> List[Image.Image]:
         """
@@ -177,31 +226,28 @@ class Emuru(PreTrainedModel):
             List[Image.Image]: List of generated images as PIL images.
         """
         assert style_imgs.ndim == 4, 'style_imgs must be 4D'
-        assert len(style_texts) == len(style_imgs), 'style_texts and style_imgs must have the same length'
         assert len(gen_texts) == len(style_imgs), 'gen_texts and style_imgs must have the same length'
-        texts = [style_text + ' ' + gen_text for style_text, gen_text in zip(style_texts, gen_texts)]
+        texts = [gen_text for gen_text in gen_texts]
         
-        imgs, _, img_ends = self._generate(texts=texts, imgs=style_imgs, lengths=lengths, **kwargs)
+        imgs, _ = self._generate(texts=texts, imgs=style_imgs, **kwargs)
         imgs = (imgs + 1) / 2
 
         out_imgs = []
-        for i, end in enumerate(img_ends):
-            start = lengths[i]
-            out_imgs.append(F.to_pil_image(imgs[i, ..., start:end].detach().cpu()))
+        for i in range(imgs.size(0)):
+            out_imgs.append(F.to_pil_image(imgs[i].detach().cpu()))
         return out_imgs
 
     def _generate(
         self,
         texts: Optional[List[str]] = None,
         imgs: Optional[torch.Tensor] = None,
-        lengths: Optional[List[int]] = None,
         input_ids: Optional[torch.Tensor] = None,
         z_sequence: Optional[torch.Tensor] = None,
         max_new_tokens: int = 256,
         stopping_criteria: str = 'latent',
         stopping_after: int = 10,
         stopping_patience: int = 1
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Internal generation routine that combines textual and visual inputs to iteratively generate
         latent representations and decode them into images.
@@ -229,98 +275,68 @@ class Emuru(PreTrainedModel):
             input_ids = input_ids.to(self.device)
 
         if z_sequence is None:
-            _, z_sequence, _ = self._img_encode(imgs)
+            posterior_style = self.vae.encode(imgs.float())
+            z_style = posterior_style.latent_dist.sample()
+            z_style_sequence = self.query_rearrange(z_style)
+            z_sequence = z_style_sequence
         
-        if lengths is None:
-            lengths = [imgs.size(-1)] * imgs.size(0)
-        lengths = torch.tensor(lengths).to(self.device)
-        lengths = (lengths / 8).ceil().int()
+        if self.style_enc == "mean":
+            style_global = z_sequence.mean(dim=1, keepdim=True)  # (b, 1, d)
+        elif self.style_enc == "MLP" or self.style_enc == "MLP2":
+            style_scores = self.style_encoder(z_sequence)  # (b, w, 1)
+            style_weights = torch.softmax(style_scores, dim=1)  # (b, w, 1)
+            style_global = (z_sequence * style_weights).sum(dim=1, keepdim=True)  # (b, 1, d)
+        elif self.style_enc == "full":
+            style_global = z_sequence  # (b, w, d)
+        else:
+            raise ValueError(f"Unknown style_enc type: {self.style_enc}")
+        
+        w_style = style_global.size(1)
+        style_token_embed = self.vae_to_t5(style_global)  # (b, w_style, t5_d_model)
 
-        z_sequence_mask = torch.zeros((z_sequence.size(0), lengths.max() + max_new_tokens))
-        z_sequence_mask = z_sequence_mask.bool().to(self.device)
-        for i, l in enumerate(lengths):
-            z_sequence_mask[i, :l] = True
-
-        canvas_sequence = z_sequence[:, :lengths.min()]
+        # prepare for decoder input
         sos = repeat(self.sos.weight, '1 d -> b 1 d', b=input_ids.size(0))
         pad_token = repeat(self.padding_token, '1 d -> b 1 d', b=input_ids.size(0))
-        seq_stops = torch.ones(z_sequence.size(0), dtype=torch.int) * -1
 
-        for token_idx in range(lengths.min(), lengths.max() + max_new_tokens):
-            if len(z_sequence) == 0:
-                decoder_inputs_embeds = sos
+        generated_latents: List[torch.Tensor] = []
+        active = torch.ones(input_ids.size(0), dtype=torch.bool, device=self.device) # for batch processing
+
+        for step in range(max_new_tokens):
+            if len(generated_latents) == 0:
+                decoder_inputs_embeds = torch.cat([style_token_embed, sos], dim=1) # (b, w_style + 1, t5_d_model)
             else:
-                decoder_inputs_embeds = self.vae_to_t5(canvas_sequence)
-                decoder_inputs_embeds = torch.cat([sos, decoder_inputs_embeds], dim=1)
+                lat_seq = torch.stack(generated_latents, dim=1)  # (b, t, vae_latent_size)
+                lat_embeds = self.vae_to_t5(lat_seq)  # (b, t, t5_d_model)
+                decoder_inputs_embeds = torch.cat([style_token_embed, sos, lat_embeds], dim=1) # (b, w_style + 1 + t, t5_d_model)
+        
             output = self.T5(input_ids, decoder_inputs_embeds=decoder_inputs_embeds)
-            vae_latent = self.t5_to_vae(output.logits[:, -1:])
+            last_hidden = output.logits[:, -1:, :]  # (b, 1, t5_d_model)
+            vae_latent = self.t5_to_vae(last_hidden)[:, 0, :]  # (b, vae_latent_size)
 
-            mask_slice = z_sequence_mask[:, token_idx].unsqueeze(-1)
-            if token_idx < z_sequence.size(1):
-                seq_slice = torch.where(mask_slice, z_sequence[:, token_idx], vae_latent[:, 0])
-            else:
-                seq_slice = vae_latent[:, 0]
-            canvas_sequence = torch.cat([canvas_sequence, seq_slice.unsqueeze(1)], dim=1)
+            if stopping_criteria == 'latent' and (~active).any():
+                vae_latent = torch.where(
+                    active.unsqueeze(-1),
+                    vae_latent,
+                    pad_token.squeeze(1)
+                )
+            
+            generated_latents.append(vae_latent) 
+            canvas_sequence = torch.stack(generated_latents, dim=1)  # (b, t+1, vae_latent_size)
 
             if stopping_criteria == 'latent':
-                similarity = torch.nn.functional.cosine_similarity(canvas_sequence, pad_token, dim=-1)
-                windows = (similarity > self.padding_token_threshold).unfold(1, min(stopping_after, similarity.size(-1)), 1)
-                window_sums = windows.to(torch.int).sum(dim=2)
+                similarity = torch.nn.functional.cosine_similarity(canvas_sequence, pad_token, dim=-1) # (b, t+1)
+                if similarity.size(1) >= stopping_after:
+                    window = similarity[:, -stopping_after:] # (b, stopping_after)
+                    cnt = (window > self.padding_token_threshold).to(torch.int).sum(dim=1)  # (b,)
+                    new = (cnt >= (stopping_after - stopping_patience)) & active  # (b,)
+                    active = active & (~new)
 
-                for i in range(similarity.size(0)):
-                    idx = (window_sums[i] > (stopping_after - stopping_patience)).nonzero(as_tuple=True)[0]
-                    if idx.numel() > 0:
-                        seq_stops[i] = idx[0].item()
+                    if not active.any():
+                        break
 
-                if torch.all(seq_stops >= 0):
-                    break
             elif stopping_criteria == 'none':
                 pass
 
+        canvas_sequence = torch.stack(generated_latents, dim=1)  # (b, t, vae_latent_size)
         imgs = torch.clamp(self.vae.decode(self.z_rearrange(canvas_sequence)).sample, -1, 1)
-        return imgs, canvas_sequence, seq_stops * 8
-    
-    def _img_encode(
-        self,
-        img: torch.Tensor,
-        noise: float = 0
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Encode the input image into a latent representation using the VAE.
-        Args:
-            img (torch.Tensor): Input image tensor.
-            noise (float): Standard deviation of noise to add to the latent sequence.
-        Returns:
-            Tuple containing:
-                - decoder_inputs_embeds (torch.Tensor): Embeddings to be used as T5 decoder inputs.
-                - z_sequence (torch.Tensor): Rearranged latent sequence from the VAE.
-                - z (torch.Tensor): Sampled latent vector from the VAE.
-        """
-        posterior = self.vae.encode(img.float())
-        z = posterior.latent_dist.sample()
-        z_sequence = self.query_rearrange(z)
-
-        noise_sequence = z_sequence
-        if noise > 0:
-            noise_sequence = z_sequence + torch.randn_like(z_sequence) * noise
-
-        decoder_inputs_embeds = self.vae_to_t5(noise_sequence)
-        sos = repeat(self.sos.weight, '1 d -> b 1 d', b=decoder_inputs_embeds.size(0))
-        decoder_inputs_embeds = torch.cat([sos, decoder_inputs_embeds], dim=1)
-        return decoder_inputs_embeds, z_sequence, z
-
-    def compute_padding_token(self) -> None:
-        """
-        Compute and update the padding token.
-        Raises:
-            NotImplementedError: This method must be implemented.
-        """
-        raise NotImplementedError("compute_padding_token not implemented")
-
-    def compute_padding_token_threshold(self) -> None:
-        """
-        Compute and update the padding token threshold.
-        Raises:
-            NotImplementedError: This method must be implemented.
-        """
-        raise NotImplementedError("compute_padding_token_threshold not implemented")
+        return imgs, canvas_sequence
