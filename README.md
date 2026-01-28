@@ -8,9 +8,9 @@
 
 The code is tested on Python 3.11.13, CUDA 12.8, and PyTorch 2.7.1 using a NVIDIA RTX Pro 6000 Blackwelll GPU.
 
-View **Paper**, **Models**, and the **Demo** below:
+View **Report**, **Models**, and the **Demo** below:
 
-[![Paper](https://img.shields.io/badge/Paper-green.svg)](./assets/Imuru.pdf)    [![Imuru](https://img.shields.io/badge/%F0%9F%A4%97%20Model-Imuru_large-blue)](https://huggingface.co/Ruian7P/imuru_large)    [![Imuru](https://img.shields.io/badge/%F0%9F%A4%97%20Model-Imuru_small-blue)](https://huggingface.co/Ruian7P/imuru_small)    [![Imuru](https://img.shields.io/badge/%F0%9F%A4%97%20Demo-Imuru-red)](https://huggingface.co/spaces/Ruian7P/imuru)
+[![Report](https://img.shields.io/badge/Report-green.svg)](./assets/Imuru.pdf)    [![Imuru](https://img.shields.io/badge/%F0%9F%A4%97%20Model-Imuru_large-blue)](https://huggingface.co/Ruian7P/imuru_large)    [![Imuru](https://img.shields.io/badge/%F0%9F%A4%97%20Model-Imuru_small-blue)](https://huggingface.co/Ruian7P/imuru_small)    [![Imuru](https://img.shields.io/badge/%F0%9F%A4%97%20Demo-Imuru-red)](https://huggingface.co/spaces/Ruian7P/imuru)
 
 <p align="center">
   <img src="assets/imuru_pipeline.png" alt="Overview of the proposed Imuru" style="width: 80%;">
